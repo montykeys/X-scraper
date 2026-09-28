@@ -128,6 +128,12 @@ python -m x_scraper.cli user elonmusk --free-proxies
 `filter_tweets_by_topic`, `summarize_tweets`, and `tag_tweet_sentiment` as
 MCP tools, so Claude can scrape and analyze X directly in conversation.
 
+The browser launches once at server startup (via an MCP lifespan) and stays
+warm for every tool call after that, instead of a fresh Chromium process
+per call — since the MCP server is already a long-lived process, this is
+the single biggest latency win available: no ~1-2s browser startup cost on
+every scrape.
+
 Register it with Claude Code:
 
 ```bash
