@@ -4,6 +4,7 @@ Examples:
     python -m x_scraper.cli user elonmusk --count 40
     python -m x_scraper.cli search "claude code" --count 30
     python -m x_scraper.cli user elonmusk --filter-topic "AI" --summarize
+    python -m x_scraper.cli login   # save a browser login session for reuse
 """
 
 from __future__ import annotations
@@ -15,25 +16,32 @@ import os
 
 from .scraper import scrape_search, scrape_user, scrape_users
 
-
-def _load_cookies() -> dict[str, str] | None:
-    raw = os.environ.get("X_SCRAPER_COOKIES")
-    if not raw:
-        return None
-    return json.loads(raw)
+DEFAULT_STORAGE_STATE = os.environ.get("X_SCRAPER_STORAGE_STATE", "storage_state.json")
 
 
 async def _run(args: argparse.Namespace) -> None:
-    cookies = _load_cookies()
+    storage_state = args.storage_state if os.path.exists(args.storage_state) else None
+
+    if args.command == "login":
+        from .browser import save_login_state
+
+        await save_login_state(args.storage_state)
+        return
 
     if args.command == "user":
         if len(args.targets) == 1:
-            tweets = await scrape_user(args.targets[0], count=args.count, cookies=cookies)
+            tweets = await scrape_user(
+                args.targets[0], count=args.count, storage_state=storage_state
+            )
         else:
-            grouped = await scrape_users(args.targets, count=args.count, cookies=cookies)
+            grouped = await scrape_users(
+                args.targets, count=args.count, storage_state=storage_state
+            )
             tweets = [t for group in grouped.values() for t in group]
     elif args.command == "search":
-        tweets = await scrape_search(args.query, count=args.count, cookies=cookies)
+        tweets = await scrape_search(
+            args.query, count=args.count, storage_state=storage_state
+        )
     else:
         raise SystemExit(f"unknown command: {args.command}")
 
@@ -45,7 +53,7 @@ async def _run(args: argparse.Namespace) -> None:
             tweets = local.filter_relevant(tweets, args.filter_topic)
         if args.sentiment:
             for t in tweets:
-                t["sentiment"] = local.classify_sentiment(t.get("text", ""))
+                t["sentiment"] = local.classify_sentiment(t.get("text") or "")
         if args.summarize:
             print(local.summarize(tweets))
             print()
@@ -59,8 +67,12 @@ async def _run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scrape X/Twitter without the official API.")
+    parser = argparse.ArgumentParser(
+        description="Scrape X/Twitter by rendering pages in a browser (no API calls)."
+    )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("login", help="Open a browser to log in once and save the session")
 
     p_user = sub.add_parser("user", help="Scrape one or more user timelines")
     p_user.add_argument("targets", nargs="+", help="Screen name(s), no @")
@@ -72,9 +84,23 @@ def main() -> None:
 
     for p in (p_user, p_search):
         p.add_argument("--out", help="Write results as JSONL to this path")
-        p.add_argument("--filter-topic", help="Keep only tweets relevant to this topic (local model)")
+        p.add_argument(
+            "--filter-topic", help="Keep only tweets relevant to this topic (local model)"
+        )
         p.add_argument("--summarize", action="store_true", help="Print a local-model summary")
         p.add_argument("--sentiment", action="store_true", help="Tag each tweet with sentiment")
+
+    for cmd in ("user", "search"):
+        sub.choices[cmd].add_argument(
+            "--storage-state",
+            default=DEFAULT_STORAGE_STATE,
+            help="Path to saved login session from `login` (default: storage_state.json)",
+        )
+    sub.choices["login"].add_argument(
+        "--storage-state",
+        default=DEFAULT_STORAGE_STATE,
+        help="Where to save the login session",
+    )
 
     args = parser.parse_args()
     asyncio.run(_run(args))

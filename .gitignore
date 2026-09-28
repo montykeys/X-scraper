@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 models/*.gguf
 x_scraper_cache.sqlite3
+storage_state.json
 *.egg-info/
 .pytest_cache/

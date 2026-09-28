@@ -1,28 +1,51 @@
 # X-scraper
 
-Async scraper for X (Twitter) that talks directly to X's internal web
-GraphQL API — the same endpoints x.com itself uses to render logged-out
-profile and search pages — instead of the paid official API.
+Scrapes X (Twitter) by rendering real pages in a headless browser and
+reading tweets straight out of the DOM. **No API calls of any kind** — not
+the paid official API, not X's internal GraphQL/REST endpoints. Just a
+browser loading x.com like a person would, and code reading what's on
+screen.
 
-## How it avoids the official API
+## How it works
 
-X's web client authenticates unauthenticated ("guest") requests with a
-public bearer token embedded in its own JS bundle, exchanged for a
-short-lived guest token via `POST /1.1/guest/activate.json`. `x_scraper`
-does the same exchange and then calls the same `UserByScreenName`,
-`UserTweets`, and `SearchTimeline` GraphQL operations the web app uses.
-Optional account cookies (`X_SCRAPER_COOKIES`) raise rate limits / unlock
-gated content but aren't required for public profiles and search.
+`x_scraper.browser.BrowserSession` drives headless Chromium via Playwright:
+
+1. Navigate to a profile (`x.com/<user>`) or search page
+   (`x.com/search?q=...&f=live`).
+2. Wait for `article[data-testid="tweet"]` elements to render.
+3. Read text/author/timestamp/link straight out of the DOM
+   (`page.evaluate`), no network interception or endpoint replay involved.
+4. Scroll and repeat until enough tweets are collected.
 
 ## Performance
 
-- One pooled `httpx.AsyncClient` (HTTP/2) reused across every request —
-  no per-request TLS/TCP handshakes.
-- Bounded concurrency (semaphore) so many profiles/searches scrape in
-  parallel without tripping rate limits.
-- Exponential backoff + guest-token auto-refresh on 429/403/5xx.
-- SQLite response cache (15 min TTL by default) — reruns of the same
-  pipeline cost nothing.
+- One shared `Browser` + persistent `BrowserContext` reused across every
+  scrape (skips per-call browser/context startup).
+- Route interception blocks images/media/fonts/stylesheets — only the text
+  DOM is needed, so pages load a fraction of their normal weight.
+- Waits on `domcontentloaded` + a specific selector instead of
+  `networkidle`, which never truly settles on X's live timeline.
+- Bounded concurrency (semaphore) so multiple profiles/searches scrape in
+  parallel tabs.
+- SQLite response cache (15 min TTL) so repeated pipeline runs cost
+  nothing.
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+Public profiles/search often render logged out, but X increasingly gates
+content behind login. Save a session once:
+
+```bash
+python -m x_scraper.cli login   # opens a real browser, log in, press Enter
+```
+
+This saves cookies/local storage to `storage_state.json`, reused
+automatically by later headless runs.
 
 ## Local sub-1B model
 
@@ -32,7 +55,6 @@ machine for filtering/summarization/sentiment tagging. Default model is
 Qwen2.5-0.5B-Instruct, quantized to Q4_K_M (~350MB), fast enough on CPU.
 
 ```bash
-pip install -r requirements.txt
 ./scripts/download_model.sh   # fetches the GGUF weights once
 ```
 
@@ -42,7 +64,7 @@ pip install -r requirements.txt
 # Scrape a profile
 python -m x_scraper.cli user elonmusk --count 40
 
-# Scrape several profiles concurrently
+# Scrape several profiles concurrently (separate tabs, one browser)
 python -m x_scraper.cli user elonmusk sama --count 20
 
 # Search
@@ -54,9 +76,6 @@ python -m x_scraper.cli user elonmusk --filter-topic "AI safety" --summarize
 # Tag sentiment and write JSONL
 python -m x_scraper.cli search "claude code" --sentiment --out results.jsonl
 ```
-
-Set `X_SCRAPER_COOKIES` to a JSON object (e.g. `{"auth_token": "...", "ct0": "..."}`)
-to scrape as an authenticated account.
 
 ## Tests
 
