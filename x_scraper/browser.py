@@ -10,8 +10,15 @@ Speed optimizations:
   call). Contexts are still created per-scrape when proxy rotation is on,
   since Playwright binds a proxy at context creation, not per-page — but
   context creation is cheap relative to a fresh browser process.
-- Route interception blocks images/media/fonts/stylesheets, cutting page
-  weight drastically since only text content is needed.
+- Route interception blocks every resource type that isn't required to get
+  text out of the DOM (images/media/fonts/stylesheets/manifests/beacons/
+  prefetches), plus known ad/analytics/telemetry domains by name and
+  twimg.com's own image/video CDN subdomains. `script`, `document`, and
+  `xhr`/`fetch` stay on since x.com is a client-rendered SPA — no JS, no
+  tweet text.
+- Browser launches with GPU, extensions, background networking, sync,
+  translate, and audio all disabled — none of it is used by a headless
+  text scrape.
 - Waits on `domcontentloaded` + a specific selector instead of
   `networkidle`, which on x.com's live-updating timeline never truly settles.
 - Bounded concurrency across multiple tabs so several profiles/searches
@@ -33,7 +40,53 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from .proxy_pool import ProxyPool
 
-BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+BLOCKED_RESOURCE_TYPES = {
+    "image",
+    "media",
+    "font",
+    "stylesheet",
+    "manifest",
+    "texttrack",
+    "eventsource",
+    "ping",
+    "cspviolationreport",
+    "other",
+}
+
+# Third-party ad/analytics/telemetry hosts that never contribute tweet text,
+# blocked by name in case Chromium tags their requests with an allowed
+# resource type (e.g. analytics "fetch" beacons).
+BLOCKED_DOMAINS = (
+    "google-analytics.com",
+    "googletagmanager.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "scorecardresearch.com",
+    "ads-twitter.com",
+    "ads-api.twitter.com",
+    "sentry.io",
+    "analytics.twitter.com",
+    "cdn.syndication.twimg.com",
+)
+
+# twimg.com serves x.com's own image/video CDN — never needed for tweet text.
+BLOCKED_ASSET_HOST_SUFFIXES = ("pbs.twimg.com", "video.twimg.com", "abs-0.twimg.com")
+
+LEAN_LAUNCH_ARGS = [
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--mute-audio",
+    "--no-first-run",
+    "--metrics-recording-only",
+    "--blink-settings=imagesEnabled=false",
+]
 
 TWEET_SELECTOR = 'article[data-testid="tweet"]'
 
@@ -79,7 +132,9 @@ class BrowserSession:
 
     async def __aenter__(self) -> "BrowserSession":
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        self._browser = await self._playwright.chromium.launch(
+            headless=True, args=LEAN_LAUNCH_ARGS
+        )
         if not self._use_free_proxies:
             self._context = await self._new_context()
         return self
@@ -107,10 +162,18 @@ class BrowserSession:
 
     @staticmethod
     async def _maybe_block(route):
-        if route.request.resource_type in BLOCKED_RESOURCE_TYPES:
+        request = route.request
+        if request.resource_type in BLOCKED_RESOURCE_TYPES:
             await route.abort()
-        else:
-            await route.continue_()
+            return
+        url = request.url
+        if any(domain in url for domain in BLOCKED_DOMAINS):
+            await route.abort()
+            return
+        if any(host in url for host in BLOCKED_ASSET_HOST_SUFFIXES):
+            await route.abort()
+            return
+        await route.continue_()
 
     async def scroll_and_collect(
         self, page: Page, count: int, max_scrolls: int = 15

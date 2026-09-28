@@ -21,8 +21,15 @@ screen.
 
 - One shared `Browser` + persistent `BrowserContext` reused across every
   scrape (skips per-call browser/context startup).
-- Route interception blocks images/media/fonts/stylesheets — only the text
-  DOM is needed, so pages load a fraction of their normal weight.
+- Route interception blocks every resource type that isn't needed for text
+  (images/media/fonts/stylesheets/manifests/beacons/prefetches), plus known
+  ad/analytics/telemetry domains and twimg.com's image/video CDN by name.
+  Only `document`, `script`, and `xhr`/`fetch` stay on — X is a
+  client-rendered SPA, so JS + its own data fetches are the only things
+  that produce tweet text.
+- Chromium launches with GPU, extensions, background networking, sync,
+  translate, and audio disabled, plus `imagesEnabled=false` at the engine
+  level as a second layer under the route blocking.
 - Waits on `domcontentloaded` + a specific selector instead of
   `networkidle`, which never truly settles on X's live timeline.
 - Bounded concurrency (semaphore) so multiple profiles/searches scrape in
