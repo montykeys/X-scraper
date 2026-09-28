@@ -1,11 +1,18 @@
-"""Local sub-1B parameter model for on-device tweet filtering/summarization.
+"""On-device tweet processing: a purpose-built detector for classification,
+a small instruction model for summarization.
 
-Runs entirely offline via llama.cpp (llama-cpp-python) so scraped data never
-has to be sent to a cloud LLM API. Defaults to Qwen2.5-0.5B-Instruct
-(~0.5B params, ~350MB in Q4_K_M GGUF), small enough to run fast on CPU.
+Two different jobs, two different tools:
+- Relevance filtering and sentiment are classification, not generation —
+  handled by x_scraper.detector.TweetDetector, a TF-IDF + logistic
+  regression model trained specifically for this task (see
+  detector/train.py). It's accurate, deterministic, and microseconds per
+  call, none of which a generic instruction-following LLM reliably is at
+  0.5B parameters.
+- Summarization is genuinely generative, so it stays on Qwen2.5-0.5B-
+  Instruct via llama.cpp, with a few-shot prompt to keep output format
+  consistent.
 
-Use `scripts/download_model.sh` to fetch the GGUF weights once; this module
-just loads whatever file is at MODEL_PATH.
+Everything runs fully offline; no data leaves the machine.
 """
 
 from __future__ import annotations
@@ -15,14 +22,30 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from .detector import TweetDetector
+
 DEFAULT_MODEL_PATH = Path(
     os.environ.get("X_SCRAPER_MODEL_PATH", "models/qwen2.5-0.5b-instruct-q4_k_m.gguf")
 )
 
 _SYSTEM_PROMPT = (
-    "You are a terse text-classification and summarization assistant. "
-    "Follow the requested output format exactly with no extra commentary."
+    "You are a terse summarization assistant. Follow the requested output "
+    "format exactly with no extra commentary."
 )
+
+_SUMMARIZE_FEWSHOT = """Example:
+Tweets:
+- alice: Just shipped the new onboarding flow, conversion is already up 12%.
+- bob: Server room AC died again, this is the third time this month.
+- carol: Great turnout at the meetup last night, over 200 people showed.
+
+Summary:
+- Alice's team shipped a new onboarding flow, boosting conversion 12%.
+- Recurring AC failures in the server room, third time this month.
+- Strong turnout (200+) at last night's meetup.
+
+Now summarize these:
+"""
 
 
 @lru_cache(maxsize=1)
@@ -42,12 +65,13 @@ def _load(model_path: str):
 
 
 class LocalFilter:
-    """Thin wrapper around the local model for the two tasks the scraper needs."""
+    """Combines the tweet detector (classification) and Qwen (summarization)."""
 
     def __init__(self, model_path: str | Path | None = None):
         self.model_path = str(model_path or DEFAULT_MODEL_PATH)
+        self._detector = TweetDetector()
 
-    def _chat(self, user_prompt: str, max_tokens: int = 128) -> str:
+    def _chat(self, user_prompt: str, max_tokens: int = 200) -> str:
         llm = _load(self.model_path)
         out = llm.create_chat_completion(
             messages=[
@@ -60,28 +84,18 @@ class LocalFilter:
         return out["choices"][0]["message"]["content"].strip()
 
     def is_relevant(self, tweet_text: str, topic: str) -> bool:
-        """Cheap on-device relevance filter to cut noise before any further processing."""
-        prompt = (
-            f'Topic: "{topic}"\nTweet: "{tweet_text}"\n'
-            'Is this tweet relevant to the topic? Reply with exactly one word: yes or no.'
-        )
-        reply = self._chat(prompt, max_tokens=3).lower()
-        return reply.startswith("y")
+        return self._detector.is_relevant(tweet_text, topic)
 
     def filter_relevant(self, tweets: list[dict], topic: str) -> list[dict]:
-        return [t for t in tweets if self.is_relevant(t.get("text", ""), topic)]
+        return self._detector.filter_relevant(tweets, topic)
+
+    def classify_sentiment(self, tweet_text: str) -> str:
+        return self._detector.classify_sentiment(tweet_text)
 
     def summarize(self, tweets: list[dict], max_tokens: int = 200) -> str:
         joined = "\n".join(f"- {t.get('author')}: {t.get('text')}" for t in tweets[:30])
-        prompt = f"Summarize the key points from these tweets in 3-5 bullet points:\n{joined}"
+        prompt = f"{_SUMMARIZE_FEWSHOT}Tweets:\n{joined}\n\nSummary:"
         return self._chat(prompt, max_tokens=max_tokens)
-
-    def classify_sentiment(self, tweet_text: str) -> str:
-        prompt = (
-            f'Tweet: "{tweet_text}"\n'
-            "Classify sentiment as exactly one word: positive, negative, or neutral."
-        )
-        return self._chat(prompt, max_tokens=3).lower()
 
 
 def dump_jsonl(tweets: list[dict], path: str | Path) -> None:

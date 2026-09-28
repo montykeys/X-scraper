@@ -79,15 +79,25 @@ python -m x_scraper.cli login   # opens a real browser, log in, press Enter
 This saves cookies/local storage to `storage_state.json`, reused
 automatically by later headless runs.
 
-## Local sub-1B model
+## On-device models: two, not one
 
-`x_scraper.local_model` runs a small (~0.5B parameter) instruction model
-fully offline via `llama.cpp`, so scraped data never has to leave the
-machine for filtering/summarization/sentiment tagging. Default model is
-Qwen2.5-0.5B-Instruct, quantized to Q4_K_M (~350MB), fast enough on CPU.
+Filtering/summarizing scraped tweets is two different jobs, so it's two
+different models — a generative LLM is the wrong tool for classification:
+
+- **Relevance + sentiment (classification)** — `x_scraper.detector`, a
+  TF-IDF + logistic regression model trained specifically for this task
+  (`x_scraper/detector/data.py` + `train.py`). ~40KB total, CPU-only,
+  sub-millisecond per call, no prompt engineering, no hallucinated labels.
+  A generic 0.5B instruction model got this wrong on trivial cases (called
+  an off-topic lunch tweet "relevant to AI", called neutral statements
+  "positive"); a purpose-built classifier doesn't.
+- **Summarization (generation)** — Qwen2.5-0.5B-Instruct via `llama.cpp`
+  (~350MB Q4_K_M GGUF), the one job here that's actually generative, with
+  a few-shot prompt to keep output format consistent.
 
 ```bash
-./scripts/download_model.sh   # fetches the GGUF weights once
+./scripts/download_model.sh        # fetches the Qwen GGUF weights once
+python -m x_scraper.detector.train # trains the relevance/sentiment models (~1s, no download)
 ```
 
 ## Usage
