@@ -1,0 +1,6 @@
+playwright>=1.44
+llama-cpp-python>=0.2.90
+mcp>=2.0.0
+httpx>=0.27
+scikit-learn>=1.4
+joblib>=1.3
