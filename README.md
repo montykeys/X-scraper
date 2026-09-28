@@ -77,6 +77,36 @@ python -m x_scraper.cli user elonmusk --filter-topic "AI safety" --summarize
 python -m x_scraper.cli search "claude code" --sentiment --out results.jsonl
 ```
 
+## Use from Claude directly (MCP server)
+
+`x_scraper.mcp_server` exposes `scrape_x_user`, `scrape_x_users`, `search_x`,
+`filter_tweets_by_topic`, `summarize_tweets`, and `tag_tweet_sentiment` as
+MCP tools, so Claude can scrape and analyze X directly in conversation.
+
+Register it with Claude Code:
+
+```bash
+claude mcp add x-scraper -- python -m x_scraper.mcp_server
+```
+
+Or add manually to `.mcp.json` / `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "x-scraper": {
+      "command": "python",
+      "args": ["-m", "x_scraper.mcp_server"],
+      "cwd": "/path/to/X-scraper"
+    }
+  }
+}
+```
+
+Run `python -m x_scraper.cli login` first if scraping requires an
+authenticated session — the MCP server picks up `storage_state.json`
+automatically.
+
 ## Tests
 
 ```bash
