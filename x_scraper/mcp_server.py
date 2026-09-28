@@ -23,6 +23,7 @@ mcp = MCPServer(
 
 STORAGE_STATE = os.environ.get("X_SCRAPER_STORAGE_STATE", "storage_state.json")
 _storage_state = STORAGE_STATE if os.path.exists(STORAGE_STATE) else None
+_use_free_proxies = os.environ.get("X_SCRAPER_FREE_PROXIES", "").lower() in ("1", "true", "yes")
 
 
 @mcp.tool()
@@ -35,7 +36,9 @@ async def scrape_x_user(screen_name: str, count: int = 40) -> list[dict]:
         screen_name: The account's handle, without the @ (e.g. "elonmusk").
         count: Max number of tweets to return.
     """
-    return await scrape_user(screen_name, count=count, storage_state=_storage_state)
+    return await scrape_user(
+        screen_name, count=count, storage_state=_storage_state, use_free_proxies=_use_free_proxies
+    )
 
 
 @mcp.tool()
@@ -46,7 +49,9 @@ async def scrape_x_users(screen_names: list[str], count: int = 40) -> dict[str, 
         screen_names: List of handles, without @.
         count: Max tweets per profile.
     """
-    return await scrape_users(screen_names, count=count, storage_state=_storage_state)
+    return await scrape_users(
+        screen_names, count=count, storage_state=_storage_state, use_free_proxies=_use_free_proxies
+    )
 
 
 @mcp.tool()
@@ -57,7 +62,9 @@ async def search_x(query: str, count: int = 20) -> list[dict]:
         query: Search text, supports X search operators (from:, since:, etc).
         count: Max number of tweets to return.
     """
-    return await scrape_search(query, count=count, storage_state=_storage_state)
+    return await scrape_search(
+        query, count=count, storage_state=_storage_state, use_free_proxies=_use_free_proxies
+    )
 
 
 @mcp.tool()

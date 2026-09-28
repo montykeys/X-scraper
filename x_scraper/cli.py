@@ -31,16 +31,25 @@ async def _run(args: argparse.Namespace) -> None:
     if args.command == "user":
         if len(args.targets) == 1:
             tweets = await scrape_user(
-                args.targets[0], count=args.count, storage_state=storage_state
+                args.targets[0],
+                count=args.count,
+                storage_state=storage_state,
+                use_free_proxies=args.free_proxies,
             )
         else:
             grouped = await scrape_users(
-                args.targets, count=args.count, storage_state=storage_state
+                args.targets,
+                count=args.count,
+                storage_state=storage_state,
+                use_free_proxies=args.free_proxies,
             )
             tweets = [t for group in grouped.values() for t in group]
     elif args.command == "search":
         tweets = await scrape_search(
-            args.query, count=args.count, storage_state=storage_state
+            args.query,
+            count=args.count,
+            storage_state=storage_state,
+            use_free_proxies=args.free_proxies,
         )
     else:
         raise SystemExit(f"unknown command: {args.command}")
@@ -89,6 +98,11 @@ def main() -> None:
         )
         p.add_argument("--summarize", action="store_true", help="Print a local-model summary")
         p.add_argument("--sentiment", action="store_true", help="Tag each tweet with sentiment")
+        p.add_argument(
+            "--free-proxies",
+            action="store_true",
+            help="Rotate through free public proxies, health-checked and auto-refreshed",
+        )
 
     for cmd in ("user", "search"):
         sub.choices[cmd].add_argument(

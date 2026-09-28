@@ -12,33 +12,48 @@ from .cache import Cache
 
 
 async def scrape_user(
-    screen_name: str, count: int = 40, storage_state: str | Path | None = None
+    screen_name: str,
+    count: int = 40,
+    storage_state: str | Path | None = None,
+    use_free_proxies: bool = False,
 ) -> list[dict]:
     cache = Cache()
     key = cache.key_for("profile", {"screen_name": screen_name, "count": count})
     if (hit := cache.get(key)) is not None:
         return hit
-    async with BrowserSession(storage_state=storage_state) as session:
+    async with BrowserSession(
+        storage_state=storage_state, use_free_proxies=use_free_proxies
+    ) as session:
         tweets = await session.scrape_profile(screen_name, count=count)
     cache.set(key, tweets)
     return tweets
 
 
 async def scrape_users(
-    screen_names: list[str], count: int = 40, storage_state: str | Path | None = None
+    screen_names: list[str],
+    count: int = 40,
+    storage_state: str | Path | None = None,
+    use_free_proxies: bool = False,
 ) -> dict[str, list[dict]]:
-    async with BrowserSession(storage_state=storage_state) as session:
+    async with BrowserSession(
+        storage_state=storage_state, use_free_proxies=use_free_proxies
+    ) as session:
         return await session.scrape_profiles(screen_names, count=count)
 
 
 async def scrape_search(
-    query: str, count: int = 20, storage_state: str | Path | None = None
+    query: str,
+    count: int = 20,
+    storage_state: str | Path | None = None,
+    use_free_proxies: bool = False,
 ) -> list[dict]:
     cache = Cache()
     key = cache.key_for("search", {"query": query, "count": count})
     if (hit := cache.get(key)) is not None:
         return hit
-    async with BrowserSession(storage_state=storage_state) as session:
+    async with BrowserSession(
+        storage_state=storage_state, use_free_proxies=use_free_proxies
+    ) as session:
         tweets = await session.scrape_search(query, count=count)
     cache.set(key, tweets)
     return tweets

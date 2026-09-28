@@ -30,6 +30,31 @@ screen.
 - SQLite response cache (15 min TTL) so repeated pipeline runs cost
   nothing.
 
+### Throughput
+
+This is I/O + render bound, not CPU bound — realistic sustained throughput
+on a normal machine is **~2-5 profile/search scrapes per second** with
+5-15 concurrent tabs (each Chromium tab costs ~150-400MB RAM; past that
+the OS starts thrashing). Scaling further means more machines, not more
+threads on one box.
+
+## Free proxy rotation (optional)
+
+`--free-proxies` (CLI) / `X_SCRAPER_FREE_PROXIES=1` (MCP server) routes
+each scrape through `x_scraper.proxy_pool.ProxyPool`: it pulls `ip:port`
+candidates from several openly-published free proxy lists, health-checks
+them concurrently against a real request, and round-robins over whichever
+ones are currently alive. Dead proxies are dropped and the pool
+re-refreshes from its sources in the background.
+
+Be realistic about what this buys you: free proxies are not infinite and
+most are dead or slow at any given moment (this is why the pool
+continuously re-checks rather than trusting a fetched list). If every
+proxy in a refresh fails, scraping transparently falls back to a direct
+connection rather than hanging. Expect proxy-routed scrapes to be slower
+and less reliable than direct ones — use it for spreading load across
+IPs, not as a performance feature.
+
 ## Setup
 
 ```bash
@@ -75,6 +100,9 @@ python -m x_scraper.cli user elonmusk --filter-topic "AI safety" --summarize
 
 # Tag sentiment and write JSONL
 python -m x_scraper.cli search "claude code" --sentiment --out results.jsonl
+
+# Rotate through free public proxies
+python -m x_scraper.cli user elonmusk --free-proxies
 ```
 
 ## Use from Claude directly (MCP server)
